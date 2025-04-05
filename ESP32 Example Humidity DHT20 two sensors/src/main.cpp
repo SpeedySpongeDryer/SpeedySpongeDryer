@@ -50,6 +50,10 @@ void setup()
   Wire1.begin(25, 26, 100000); // SDA = 25, SCL = 26
   DHT2.begin();
 
+  // Verify device addresses
+  scanI2C(&Wire);
+  scanI2C(&Wire1);
+
   delay(2000);
 }
 
