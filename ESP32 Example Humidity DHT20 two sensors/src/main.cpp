@@ -89,7 +89,6 @@ void readSensor(DHT20 &sensor, const char *type, int sensorID)
   int status = sensor.read();
   uint32_t stop = micros();
 
-  // if (status == DHT20_OK) {return sensor.getHumidity();}
 
   Serial.print(type);
   Serial.print(" \t");
