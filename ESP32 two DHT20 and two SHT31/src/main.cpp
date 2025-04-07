@@ -17,6 +17,9 @@ SHT31 SHT_1(SHT31_ADDRESS, &Wire);
 DHT20 DHT_2(&Wire1); // Other sensors on second I2C bus
 SHT31 SHT_2(SHT31_ADDRESS, &Wire1); 
 
+// Global temp/humidity variables for printing in main loop
+float dht1_temp, dht1_hum, dht2_temp, dht2_hum, sht1_temp, sht1_hum, sht2_temp, sht2_hum;
+
 // Timing vairable
  unsigned long lastReadTime = 0;
 
@@ -71,6 +74,16 @@ void loop() {
     readDHT20(DHT_2, "DHT20", 2);
     readSHT31(SHT_1, "SHT31", 1);
     readSHT31(SHT_2, "SHT31", 2);
+
+    // Print for easy data recording in spreadsheet
+    Serial.print(dht2_temp, 1);   Serial.print(" ");
+    Serial.print(sht2_temp, 1);   Serial.print(" ");
+    Serial.print(dht1_temp, 1);   Serial.print(" ");
+    Serial.print(sht1_temp, 1);   Serial.print(" ");
+    Serial.print(dht2_hum, 2);    Serial.print(" ");
+    Serial.print(sht2_hum, 2);    Serial.print(" ");
+    Serial.print(dht1_hum, 2);    Serial.print(" ");
+    Serial.println(sht1_hum, 2);
     Serial.println("______________________________________________________\n");
     
     // Increment buffer index for moving average
@@ -114,13 +127,17 @@ void readDHT20(DHT20 &sensor, const char *type, int sensorID) {
     if (sensorID == 1) {
       dht1_hum_buffer[bufferIndex] = humidity;
       filteredHumidity = getMovingAverage(dht1_hum_buffer);
+      dht1_hum = filteredHumidity;
+      dht1_temp = temperature;
     } else {
       dht2_hum_buffer[bufferIndex] = humidity;
       filteredHumidity = getMovingAverage(dht2_hum_buffer);
+      dht2_hum = filteredHumidity;
+      dht2_temp = temperature;
     }
     
     // Print the values
-    Serial.print(filteredHumidity, 1);    Serial.print("\t\t");
+    Serial.print(filteredHumidity, 2);    Serial.print("\t\t");
     Serial.print(temperature, 1);         Serial.print("\t\t");
     Serial.print(stop - start);           Serial.print("\t\tOK");
   } else {
@@ -154,13 +171,17 @@ void readSHT31(SHT31 &sensor, const char *type, int sensorID) {
     if (sensorID == 1) {
       sht1_hum_buffer[bufferIndex] = humidity;
       filteredHumidity = getMovingAverage(sht1_hum_buffer);
+      sht1_hum = filteredHumidity;
+      sht1_temp = temperature;
     } else {
       sht2_hum_buffer[bufferIndex] = humidity;
       filteredHumidity = getMovingAverage(sht2_hum_buffer);
+      sht2_hum = filteredHumidity;
+      sht2_temp = temperature;
     }
     
     // Print the values
-    Serial.print(filteredHumidity, 1);    Serial.print("\t\t");
+    Serial.print(filteredHumidity, 2);    Serial.print("\t\t");
     Serial.print(temperature, 1);         Serial.print("\t\t");
     Serial.print(stop - start);           Serial.print("\t\tOK");
   } else {
