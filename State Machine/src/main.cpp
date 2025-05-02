@@ -16,7 +16,8 @@
 #define MOTOR2_PWM2 0        // TBD
 #define MOTOR1_ADC 0        // TBD
 #define MOTOR2_ADC 0        // TBD
-#define FAN_PIN   0         // TBD
+#define FAN_PWM_PIN 0        // TBD
+#define FAN_PWM_CHAN 2       // PWM channel (motors use 0 & 1)
 
 // Threshold definitions
 #define DRY_TIMEUP 1200000  // 20 minutes
@@ -51,18 +52,23 @@ void setup()
 {
   Serial.begin(115200);
 
+  // TCRT5000 setup. PIN13 = digital output; PIN14 = analog output
   pinMode(PIN13, INPUT);
   pinMode(PIN14, INPUT);
-  pinMode(FAN_PIN, OUTPUT);
 
+  // DHT20 setup
   Wire.begin();
-  DHT.begin();    // Default ESP32 I2C pins 21 (SDA), 22 (SCL)
+  DHT.begin();          // Default ESP32 I2C pins 21 (SDA), 22 (SCL)
   
+  // Motors setup
   motor1.begin();
   motor1.setupADCInterrupt();
   motor2.begin();
   motor2.setupADCInterrupt();
 
+  // Fan setup
+  ledcSetup(FAN_PWM_CHAN, 25000, 8);         // Channel 2, 25kHz, 8-bit resolution
+  ledcAttachPin(FAN_PWM_PIN, FAN_PWM_CHAN);  // Attach pin to channel
 }
 
 
@@ -80,8 +86,9 @@ void loop()
 
 void transitionTo(SpongeState newState)
 {
+  // One exit action:
   // If coming from DRY, turn the fan off
-  if(state == DRY) {digitalWrite(FAN_PIN, LOW);}
+  if(state == DRY) {ledcWrite(FAN_PWM_CHAN, 0);} // 0% duty cycle (fan OFF)
   
   state = newState; // Update the state
   
@@ -93,7 +100,7 @@ void transitionTo(SpongeState newState)
       motor2.stopMotor();
       
       // Configure wake-up source and enter Deep Sleep
-      esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when PIN13 goes LOW
+      esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when TCRT5000 detects object
       Serial.println("Entering SLEEP state and going to deep sleep");
       esp_deep_sleep_start();
       break;
@@ -118,9 +125,11 @@ void transitionTo(SpongeState newState)
     case DRY:
       // Entry actions for Dry state
       Serial.println("Entering DRY state");
-      motor1.stopMotor();  // deactivate motors
+
+      // Stop motors and activate fan
+      motor1.stopMotor();
       motor2.stopMotor();
-      digitalWrite(FAN_PIN, HIGH);  // activate fan
+      ledcWrite(FAN_PWM_CHAN, 255);  // 255 = 100% duty cycle
       
       // Save timestamp for dry timing and calculate dry time
       dryStartTime = millis();
@@ -129,7 +138,7 @@ void transitionTo(SpongeState newState)
 
     case STANDBY:
       // Entry actions for Standby state
-      digitalWrite(FAN_PIN, LOW);  // deactivate fan
+      ledcWrite(FAN_PWM_CHAN, 0);  // deactivate fan
       
       // Configure wake-up source and enter Deep Sleep
       esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when PIN13 goes LOW
@@ -151,7 +160,7 @@ void transitionTo(SpongeState newState)
 void handleSleepState()
 {
   // This should only execute after waking from deep sleep
-  // PIN13 interrupt woke us up, which means a sponge was inserted
+  // PIN13 interrupt woke us up = TCRT5000 detected an object (hopefully a sponge)
   if (digitalRead(PIN13) == LOW) {transitionTo(SQUEEZE);}
 }
 
@@ -181,8 +190,8 @@ void handleDryState()
   unsigned long currentTime = millis();
   unsigned long elapsedTime = currentTime - dryStartTime;
   
-  // dryTime depends on ambient temperature & humidity
-  // For now, using the default value from the definitions
+  // dryTime depends on ambient temperature & humidity;
+  // value set in calculateDryTime()
   if (elapsedTime >= dryTime) {
     Serial.println("Drying time completed");
     transitionTo(EJECT);
