@@ -7,9 +7,13 @@
 #include "MotorControl.h"
 
 // Pin definitions
-#define PIN13 13    // TCRT5000 digital output (active low)
-#define PIN14 14    // TCRT5000 analog output
-#define WAKEUP_PIN (gpio_num_t)13
+#define IR_DIGITAL  15    // TCRT5000 digital output (active low)
+#define IR_ANALOG   2     // TCRT5000 analog output
+#define WAKEUP_PIN (gpio_num_t)15
+#define DHT_VCC     13
+#define DHT_SDA     12
+#define DHT_GND     14
+#define DHT_SCL     27
 #define MOTOR1_PWM1 0        // TBD
 #define MOTOR1_PWM2 0        // TBD
 #define MOTOR2_PWM1 0        // TBD
@@ -52,9 +56,9 @@ void setup()
 {
   Serial.begin(115200);
 
-  // TCRT5000 setup. PIN13 = digital output; PIN14 = analog output
-  pinMode(PIN13, INPUT);
-  pinMode(PIN14, INPUT);
+  // TCRT5000 setup
+  pinMode(IR_DIGITAL, INPUT);
+  pinMode(IR_ANALOG, INPUT);
 
   // DHT20 setup
   Wire.begin();
@@ -141,7 +145,7 @@ void transitionTo(SpongeState newState)
       ledcWrite(FAN_PWM_CHAN, 0);  // deactivate fan
       
       // Configure wake-up source and enter Deep Sleep
-      esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when PIN13 goes LOW
+      esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when PIN15 goes LOW
       Serial.println("Entering STANDBY state and going to deep sleep");
       esp_deep_sleep_start();
       break;
@@ -160,8 +164,8 @@ void transitionTo(SpongeState newState)
 void handleSleepState()
 {
   // This should only execute after waking from deep sleep
-  // PIN13 interrupt woke us up = TCRT5000 detected an object (hopefully a sponge)
-  if (digitalRead(PIN13) == LOW) {transitionTo(SQUEEZE);}
+  // PIN15 interrupt woke us up = TCRT5000 detected an object (hopefully a sponge)
+  if (digitalRead(IR_DIGITAL) == LOW) {transitionTo(SQUEEZE);}
 }
 
 void handleSqueezeState()
@@ -177,8 +181,8 @@ void handleSqueezeState()
     return;
   }
 
-  // Check if the motor has finished squeezing (detected by PIN13 going HIGH)
-  if (digitalRead(PIN13) == HIGH) {
+  // Check if the motor has finished squeezing (detected by IR_DIGITAL going HIGH)
+  if (digitalRead(IR_DIGITAL) == HIGH) {
     Serial.println("Squeeze completed");
     transitionTo(DRY);
   } 
@@ -201,27 +205,27 @@ void handleDryState()
 void handleStandbyState()
 {
   // This should only execute after waking from deep sleep;
-  // triggered by the user activating the TCRT5000 (PIN13 is LOW)
-  if (digitalRead(PIN13) == LOW) {transitionTo(EJECT);}
+  // triggered by the user activating the TCRT5000 (IR_DIGITAL is LOW)
+  if (digitalRead(IR_DIGITAL) == LOW) {transitionTo(EJECT);}
 }
 
 void handleEjectState()
 {
   // Two-stage ejection process:
-  // 1. First wait until the sensor detects the sponge (PIN13 goes LOW)
-  // 2. Then wait until the sponge passes and sensor no longer detects it (PIN13 goes HIGH)
+  // 1. First wait until the sensor detects the sponge (IR_DIGITAL goes LOW)
+  // 2. Then wait until the sponge passes and sensor no longer detects it (IR_DIGITAL goes HIGH)
   
   static bool spongeDetected = false;
   
   if (!spongeDetected) {
     // Stage 1: Wait for the sponge to reach the sensor
-    if (digitalRead(PIN13) == LOW) {
+    if (digitalRead(IR_DIGITAL) == LOW) {
       Serial.println("Sponge detected during ejection");
       spongeDetected = true;
     }
   } else {
     // Stage 2: Wait for the sponge to fully pass the sensor
-    if (digitalRead(PIN13) == HIGH) {
+    if (digitalRead(IR_DIGITAL) == HIGH) {
       Serial.println("Sponge fully ejected");
       spongeDetected = false;  // Reset for next time
       transitionTo(SLEEP);
