@@ -16,14 +16,14 @@
 #define DHT_GND 25    // PIN25 set to LOW in setup()
 #define DHT_SCL 33    // DHT20 I2C clock line
 
-#define MOTOR1_PWM1 5        // TBD
-#define MOTOR1_PWM2 18        // TBD
-#define MOTOR2_PWM1 19        // TBD
-#define MOTOR2_PWM2 21        // TBD
+#define MOTOR1_PWM1 5
+#define MOTOR1_PWM2 18
+#define MOTOR2_PWM1 19
+#define MOTOR2_PWM2 21
 #define MOTOR1_ADC 0        // TBD
 #define MOTOR2_ADC 0        // TBD
-#define FAN_PWM_PIN  32      // Fan PWM wire tied to this pin
-#define FAN_PWM_CHAN 2       // PWM channel (motors use 0 & 1)
+#define FAN_PWM_PIN  32     // Fan PWM wire tied to this pin
+#define FAN_PWM_CHAN 2      // PWM channel (motors use 0 & 1)
 
 // Threshold definitions
 #define DRY_TIMEUP 1200000  // 20 minutes
@@ -148,8 +148,6 @@ void transitionTo(SpongeState newState)
 
     case STANDBY:
       // Entry actions for Standby state
-      ledcWrite(FAN_PWM_CHAN, 0);  // deactivate fan
-      
       // Configure wake-up source and enter Deep Sleep
       esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when PIN13 goes LOW
       Serial.println("Entering STANDBY state and going to deep sleep");
@@ -200,9 +198,12 @@ void handleDryState()
   unsigned long currentTime = millis();
   unsigned long elapsedTime = currentTime - dryStartTime;
   
+  // Eject sponge if user activates the TCRT5000
+  if (digitalRead(IR_D0) == LOW) {transitionTo(EJECT);}
+  // Otherwise check if the dryTime is up.
   // dryTime depends on ambient temperature & humidity;
   // value set in calculateDryTime()
-  if (elapsedTime >= dryTime) {
+  else if (elapsedTime >= dryTime) {
     Serial.println("Drying time completed");
     transitionTo(EJECT);
   }
