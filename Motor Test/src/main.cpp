@@ -4,15 +4,15 @@
  */
 
 #include <Arduino.h>
-#include "MotorControl.h"
+// #include "MotorControl.h"
 
 #define IR_D0  13     // TCRT5000 digital output (active low)
 #define MOTOR1_PWM1 5
 #define MOTOR1_PWM2 18
 #define MOTOR2_PWM1 19
 #define MOTOR2_PWM2 21
-#define MOTOR1_ADC 0
-#define MOTOR2_ADC 0
+// #define MOTOR1_ADC 2
+// #define MOTOR2_ADC 4
 
 // States
 typedef enum {
@@ -24,8 +24,8 @@ typedef enum {
   } SpongeState;
 SpongeState state = SLEEP;
 
-MotorControl motor1(MOTOR1_PWM1, MOTOR1_PWM2, MOTOR1_ADC);
-MotorControl motor2(MOTOR2_PWM1, MOTOR2_PWM2, MOTOR2_ADC);
+// MotorControl motor1(MOTOR1_PWM1, MOTOR1_PWM2, MOTOR1_ADC);
+// MotorControl motor2(MOTOR2_PWM1, MOTOR2_PWM2, MOTOR2_ADC);
 unsigned long dryStartTime = 0;
 
 // Function declarations
@@ -35,16 +35,30 @@ void handleSleepState();
 void handleSqueezeState();
 void handleDryState();
 void handleEjectState();
+void startMotorForward();
+void startMotorBackward();
+void stopMotor();
 
 void setup() {
     Serial.begin(115200);
-    motor1.begin();
-    motor1.setupADCInterrupt();
-    motor2.begin();
-    motor2.setupADCInterrupt();
+    // motor1.begin();
+    // motor1.setupADCInterrupt();
+    // motor2.begin();
+    // motor2.setupADCInterrupt();
+
+    // Set up motor pins as outputs
+    pinMode(MOTOR1_PWM1, OUTPUT);
+    pinMode(MOTOR1_PWM2, OUTPUT);
+    pinMode(MOTOR2_PWM1, OUTPUT);
+    pinMode(MOTOR2_PWM2, OUTPUT);
+    
+    // Stop motors initially
+    stopMotor();
 
     // TCRT5000 setup for motor activation
     pinMode(IR_D0, INPUT);
+
+    Serial.println("Simplified Sponge Dryer State Machine started");
 }
 
 void loop() {
@@ -59,33 +73,47 @@ void loop() {
 }
 
 void transitionTo(SpongeState newState) {
+    Serial.print("Transitioning from ");
+    switch (state) {
+        case SLEEP:   Serial.print("SLEEP");   break;
+        case SQUEEZE: Serial.print("SQUEEZE"); break;
+        case DRY:     Serial.print("DRY");     break;
+        case EJECT:   Serial.print("EJECT");   break;
+        case STANDBY: Serial.print("STANDBY"); break;
+    }
+    
+    Serial.print(" to ");
+    switch (newState) {
+        case SLEEP:   Serial.println("SLEEP");   break;
+        case SQUEEZE: Serial.println("SQUEEZE"); break;
+        case DRY:     Serial.println("DRY");     break;
+        case EJECT:   Serial.println("EJECT");   break;
+        case STANDBY: Serial.println("STANDBY"); break;
+    }
+
   state = newState; // Update the state  
   // Handle entry actions for new state
   switch (newState) {
     case SLEEP:
-      motor1.stopMotor();
-      motor2.stopMotor();
+      stopMotor();
       break;
       
     case SQUEEZE:
-      Serial.println("Entering SQUEEZE state");
-      motor1.startMotorForward();
-      motor2.startMotorForward();
+      startMotorForward();
       break;
 
     case DRY:
-      motor1.stopMotor();
-      motor2.stopMotor();
+      stopMotor();
       // Save timestamp for dry timing
       dryStartTime = millis();
       break;
 
     case STANDBY:
+      stopMotor();
       break;
 
     case EJECT:
-      motor1.startMotorBackward();
-      motor2.startMotorBackward();
+      startMotorBackward();
       break;
   }
 }
@@ -99,14 +127,14 @@ void handleSqueezeState()
 {
   // Check if motor should stop due to voltage exceeding threshold
   // The MotorControl class handles the ADC monitoring through interrupts
-  if (MotorControl::shouldStop) {
-    Serial.println("Stopping motor due to high voltage, aborting squeeze");
-    motor1.stopMotor();
-    motor2.stopMotor();
-    MotorControl::shouldStop = false;  // Reset the flag
-    transitionTo(EJECT);
-    return;
-  }
+//   if (MotorControl::shouldStop) {
+//     Serial.println("Stopping motor due to high voltage, aborting squeeze");
+//     motor1.stopMotor();
+//     motor2.stopMotor();
+//     MotorControl::shouldStop = false;  // Reset the flag
+//     transitionTo(EJECT);
+//     return;
+//   }
 
   // Check if the motor has finished squeezing (detected by IR_D0 going HIGH)
   if (digitalRead(IR_D0) == HIGH) {
@@ -123,8 +151,8 @@ void handleDryState()
   
   // Eject sponge if user activates the TCRT5000
   if (digitalRead(IR_D0) == LOW) {transitionTo(EJECT);}
-  // Otherwise wait for 5s to pass
-  else if (elapsedTime >= 5000) {
+  // Otherwise wait for 10s to pass
+  else if (elapsedTime >= 10000) {
     Serial.println("Drying time completed");
     transitionTo(EJECT);
   }
@@ -132,6 +160,7 @@ void handleDryState()
 
 void handleStandbyState()
 {
+  // Eject sponge if user activates the TCRT5000
   if (digitalRead(IR_D0) == LOW) {transitionTo(EJECT);}
 }
 
@@ -157,4 +186,29 @@ void handleEjectState()
       transitionTo(SLEEP);
     }
   }
+}
+
+// Simple motor control functions
+void startMotorForward() {
+    digitalWrite(MOTOR1_PWM1, HIGH);
+    digitalWrite(MOTOR1_PWM2, LOW);
+    digitalWrite(MOTOR2_PWM1, HIGH);
+    digitalWrite(MOTOR2_PWM2, LOW);
+    Serial.println("Motors rotating forward");
+}
+
+void startMotorBackward() {
+    digitalWrite(MOTOR1_PWM1, LOW);
+    digitalWrite(MOTOR1_PWM2, HIGH);
+    digitalWrite(MOTOR2_PWM1, LOW);
+    digitalWrite(MOTOR2_PWM2, HIGH);
+    Serial.println("Motors rotating backward");
+}
+
+void stopMotor() {
+    digitalWrite(MOTOR1_PWM1, LOW);
+    digitalWrite(MOTOR1_PWM2, LOW);
+    digitalWrite(MOTOR2_PWM1, LOW);
+    digitalWrite(MOTOR2_PWM2, LOW);
+    Serial.println("Motors stopped");
 }

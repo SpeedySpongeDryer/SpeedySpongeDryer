@@ -36,7 +36,7 @@ void MotorControl::startMotorBackward() {
     digitalWrite(_pwmPin1, LOW);  // Disable forward direction / 禁用正转方向
     digitalWrite(_pwmPin2, HIGH); // Set motor to reverse direction / 设置电机为反转方向
     Serial.println("Motor is rotating backward"); // Print backward rotation message / 打印反转信息
-    slowStart(1, 95); // Gradually increase speed / 慢慢加速
+    slowStart(1, 256); // Gradually increase speed / 慢慢加速
 }
 
 void MotorControl::stopMotor() {
@@ -59,9 +59,9 @@ void IRAM_ATTR MotorControl::onTimer() {
     if (voltage > 0.40) {
         Serial.println("Error: Voltage exceeds 0.40V"); // Print voltage error / 打印电压错误
         shouldStop = true; // Set flag to stop motor / 设置标志以停止电机
-    } else {
-        Serial.print("Voltage: "); // Print voltage value / 打印电压值
-        Serial.println(voltage, 3); // Print with 3 decimal places / 打印 3 位小数
+    // } else {
+    //     Serial.print("Voltage: "); // Print voltage value / 打印电压值
+    //     Serial.println(voltage, 3); // Print with 3 decimal places / 打印 3 位小数
     }
     portEXIT_CRITICAL_ISR(&timerMux); // Exit critical section / 退出临界区
 }
