@@ -36,7 +36,7 @@ void MotorControl::startMotorBackward() {
     digitalWrite(_pwmPin1, LOW);  // Disable forward direction / 禁用正转方向
     digitalWrite(_pwmPin2, HIGH); // Set motor to reverse direction / 设置电机为反转方向
     Serial.println("Motor is rotating backward"); // Print backward rotation message / 打印反转信息
-    slowStart(1, 256); // Gradually increase speed / 慢慢加速
+    slowStart(1, 255); // Gradually increase speed / 慢慢加速
 }
 
 void MotorControl::stopMotor() {

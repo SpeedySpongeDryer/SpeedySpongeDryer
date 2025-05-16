@@ -2,7 +2,8 @@
  * Purpose: State Machine v1.0 for the Speedy Sponge Dryer
  */
 
-
+#include <Arduino.h>
+#include <driver/rtc_io.h>
 #include "DHT20.h"
 #include "MotorControl.h"
 
@@ -16,14 +17,15 @@
 #define DHT_GND 25    // PIN25 set to LOW in setup()
 #define DHT_SCL 33    // DHT20 I2C clock line
 
-#define MOTOR1_PWM1 5
-#define MOTOR1_PWM2 18
-#define MOTOR2_PWM1 19
-#define MOTOR2_PWM2 21
-#define MOTOR1_ADC 0        // TBD
-#define MOTOR2_ADC 0        // TBD
-#define FAN_PWM_PIN  32     // Fan PWM wire tied to this pin
-#define FAN_PWM_CHAN 2      // PWM channel (motors use 0 & 1)
+// Motor control pins - PWM and direction pairs
+#define MOTOR1_PWM 5
+#define MOTOR1_DIR 18
+#define MOTOR2_PWM 19
+#define MOTOR2_DIR 21
+#define MOTORS_ADC 14
+
+// Fan control
+#define FAN_PIN  (gpio_num_t)32
 
 // Threshold definitions
 #define DRY_TIMEUP 1200000  // 20 minutes
@@ -38,12 +40,11 @@ typedef enum {
 } SpongeState;
 
 // Global variables
-DHT20 DHT;
+DHT20 DHT(&Wire1);
 SpongeState state = SLEEP;
-MotorControl motor1(MOTOR1_PWM1, MOTOR1_PWM2, MOTOR1_ADC);
-MotorControl motor2(MOTOR2_PWM1, MOTOR2_PWM2, MOTOR2_ADC);
-unsigned long dryTime = 0, dryStartTime = 0;
-float temp = 0, humidity = 0;
+MotorControl motors(MOTOR1_PWM, MOTOR1_DIR, MOTORS_ADC, MOTOR2_PWM, MOTOR2_DIR);
+unsigned long squeezeTime = 0, squeezeStartTime = 0, dryTime = 0, dryStartTime = 0, ejectStartTime = 0;
+float temperature = 0, humidity = 0;
 
 // Function declarations
 void transitionTo(SpongeState newState);
@@ -53,10 +54,15 @@ void handleSqueezeState();
 void handleDryState();
 void handleEjectState();
 void calculateDryTime();
+void printStateTransition(SpongeState newState);
+void printMotorsVoltage(int msPrintInterval);
 
 void setup()
 {
   Serial.begin(115200);
+
+  // Release any held pins from previous deep sleep
+  rtc_gpio_hold_dis(FAN_PIN);
 
   // TCRT5000 setup
   pinMode(IR_D0, INPUT);
@@ -71,14 +77,14 @@ void setup()
   DHT.begin();
   
   // Motors setup
-  motor1.begin();
-  motor1.setupADCInterrupt();
-  motor2.begin();
-  motor2.setupADCInterrupt();
+  motors.begin();
+  motors.setupADCInterrupt();
 
   // Fan setup
-  ledcSetup(FAN_PWM_CHAN, 25000, 8);         // Channel 2, 25kHz, 8-bit resolution
-  ledcAttachPin(FAN_PWM_PIN, FAN_PWM_CHAN);  // Attach pin to channel
+  pinMode(FAN_PIN, OUTPUT);          // Set as normal GPIO output
+  digitalWrite(FAN_PIN, LOW);        // Force the pin LOW
+
+  Serial.println("Speedy Sponge Dryer State Machine started \n");
 }
 
 
@@ -96,50 +102,53 @@ void loop()
 
 void transitionTo(SpongeState newState)
 {
+  printStateTransition(newState);
+
   // One exit action:
   // If coming from DRY, turn the fan off
-  if(state == DRY) {ledcWrite(FAN_PWM_CHAN, 0);} // 0% duty cycle (fan OFF)
-  
-  state = newState; // Update the state
+  if(state == DRY) {digitalWrite(FAN_PIN, LOW);}
   
   // Handle entry actions for new state
   switch (newState) {
     case SLEEP:
       // Entry actions for Sleep state
-      motor1.stopMotor();  // deactivate motors
-      motor2.stopMotor();
+      motors.stopAllMotors();
+
+      // Release I2C bus before sleep
+      Wire1.end();
+
+      // Use RTC IO to keep fan off during sleep
+      rtc_gpio_set_direction(FAN_PIN, RTC_GPIO_MODE_OUTPUT_ONLY);
+      rtc_gpio_set_level(FAN_PIN, 0);  // Force LOW
+      rtc_gpio_hold_en(FAN_PIN);       // Hold this state during sleep
       
       // Configure wake-up source and enter Deep Sleep
       esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when TCRT5000 detects object
-      Serial.println("Entering SLEEP state and going to deep sleep");
+      Serial.println("going to deep sleep");
       esp_deep_sleep_start();
       break;
       
     case SQUEEZE:
       // Entry actions for Squeeze state
-      Serial.println("Entering SQUEEZE state");
+      squeezeStartTime = millis();
+      
+      // Start both motors
+      Serial.println("Starting both motors forward");
+      motors.startMotorsForward();
 
       // Take DHT20 reading (humidity and temperature)
-      float humidity, temperature;
       DHT.read();
       humidity = DHT.getHumidity();
       temperature = DHT.getTemperature();
       Serial.print("Humidity: "); Serial.print(humidity); 
       Serial.print("%, Temperature: "); Serial.print(temperature); Serial.println("°C");
-
-      // Start motors for squeezing
-      motor1.startMotorForward();
-      motor2.startMotorForward();
       break;
 
     case DRY:
       // Entry actions for Dry state
-      Serial.println("Entering DRY state");
-
       // Stop motors and activate fan
-      motor1.stopMotor();
-      motor2.stopMotor();
-      ledcWrite(FAN_PWM_CHAN, 255);  // 255 = 100% duty cycle
+      motors.stopAllMotors();
+      digitalWrite(FAN_PIN, HIGH);
       
       // Save timestamp for dry timing and calculate dry time
       dryStartTime = millis();
@@ -148,21 +157,29 @@ void transitionTo(SpongeState newState)
 
     case STANDBY:
       // Entry actions for Standby state
+
+      // Use RTC IO to keep fan off during sleep
+      rtc_gpio_set_direction(FAN_PIN, RTC_GPIO_MODE_OUTPUT_ONLY);
+      rtc_gpio_set_level(FAN_PIN, 0);  // Force LOW
+      rtc_gpio_hold_en(FAN_PIN);       // Hold this state during sleep
+
       // Configure wake-up source and enter Deep Sleep
       esp_sleep_enable_ext0_wakeup(WAKEUP_PIN, LOW);  // Wake up when PIN13 goes LOW
-      Serial.println("Entering STANDBY state and going to deep sleep");
+      Serial.println("going to deep sleep");
       esp_deep_sleep_start();
       break;
 
     case EJECT:
       // Entry actions for Eject state
-      Serial.println("Entering EJECT state");
+      // Save timestamp for debouncing period
+      ejectStartTime = millis();
 
       // Start motors in backward direction for ejection
-      motor1.startMotorBackward();
-      motor2.startMotorBackward();
+      motors.startMotorsBackward();
       break;
   }
+
+  state = newState; // Update the state
 }
 
 void handleSleepState()
@@ -176,20 +193,37 @@ void handleSqueezeState()
 {
   // Check if motor should stop due to voltage exceeding threshold
   // The MotorControl class handles the ADC monitoring through interrupts
-  if (MotorControl::shouldStop) {
-    Serial.println("Stopping motor due to high voltage, aborting squeeze");
-    motor1.stopMotor();
-    motor2.stopMotor();
-    MotorControl::shouldStop = false;  // Reset the flag
-    transitionTo(EJECT);
-    return;
+  // if (MotorControl::shouldStop) {
+  //   Serial.println("Stopping motor due to high voltage, aborting squeeze");
+  //   motor1.stopMotor();
+  //   motor2.stopMotor();
+  //   MotorControl::shouldStop = false;  // Reset the flag
+  //   transitionTo(EJECT);
+  //   return;
+  // }
+  // printMotorsVoltage(100); // Print ADC readings 10 times per second
+  
+  // Two-stage squeeze process:
+  // 1. First wait until the sensor no longer detects the sponge (IR_D0 goes HIGH)
+  // 2. Then wait for the sponge to fully enter the evaporation chamber (timer based)
+  
+  static bool spongeDetected = true;
+  static unsigned long startTime = 0;
+  static uint8_t numSqueezes = 0;
+  
+  if (spongeDetected) {
+    // Stage 1: Wait for the sponge to clear the sensor
+    if (digitalRead(IR_D0) == HIGH) {
+      Serial.println("Sponge passed IR sensor");
+      spongeDetected = false;
+      startTime = millis();
+    }
+  } else {
+    // Stage 2: Wait for the sponge to fully enter the evap chamber
+    if (millis() - startTime >= 1600) {
+      transitionTo(EJECT);
+    }
   }
-
-  // Check if the motor has finished squeezing (detected by IR_D0 going HIGH)
-  if (digitalRead(IR_D0) == HIGH) {
-    Serial.println("Squeeze completed");
-    transitionTo(DRY);
-  } 
 }
 
 void handleDryState()
@@ -200,12 +234,11 @@ void handleDryState()
   
   // Eject sponge if user activates the TCRT5000
   if (digitalRead(IR_D0) == LOW) {transitionTo(EJECT);}
-  // Otherwise check if the dryTime is up.
-  // dryTime depends on ambient temperature & humidity;
-  // value set in calculateDryTime()
+  // Otherwise check if the dryTime is up. (dryTime depends on ambient 
+  // temperature & humidity; value set in calculateDryTime())
   else if (elapsedTime >= dryTime) {
     Serial.println("Drying time completed");
-    transitionTo(EJECT);
+    transitionTo(STANDBY);
   }
 }
 
@@ -218,23 +251,25 @@ void handleStandbyState()
 
 void handleEjectState()
 {
+  // printMotorsVoltage(100); // Print ADC readings 10 times per second
+
   // Two-stage ejection process:
-  // 1. First wait until the sensor detects the sponge (IR_D0 goes LOW)
+  // 1. First wait for the debouncing period to pass
   // 2. Then wait until the sponge passes and sensor no longer detects it (IR_D0 goes HIGH)
   
-  static bool spongeDetected = false;
+  static bool debouncing = true;
   
-  if (!spongeDetected) {
-    // Stage 1: Wait for the sponge to reach the sensor
-    if (digitalRead(IR_D0) == LOW) {
-      Serial.println("Sponge detected during ejection");
-      spongeDetected = true;
+  if (debouncing) {
+    // Stage 1: Observe debouncing period of 4s
+    if (millis() - ejectStartTime >= 4000) {
+      Serial.println("Debouncing period complete");
+      debouncing = false;
     }
   } else {
     // Stage 2: Wait for the sponge to fully pass the sensor
     if (digitalRead(IR_D0) == HIGH) {
       Serial.println("Sponge fully ejected");
-      spongeDetected = false;  // Reset for next time
+      debouncing = true;  // Reset for next time
       transitionTo(SLEEP);
     }
   }
@@ -244,4 +279,38 @@ void calculateDryTime()
 {
   // FORMULA TBD. FOR NOW:
   dryTime = DRY_TIMEUP;
+}
+
+void printStateTransition(SpongeState newState)
+{
+  Serial.print("\nTransitioning from ");
+    switch (state) {
+        case SLEEP:   Serial.print("SLEEP");   break;
+        case SQUEEZE: Serial.print("SQUEEZE"); break;
+        case DRY:     Serial.print("DRY");     break;
+        case EJECT:   Serial.print("EJECT");   break;
+        case STANDBY: Serial.print("STANDBY"); break;
+    }
+    
+    Serial.print(" to ");
+    switch (newState) {
+        case SLEEP:   Serial.println("SLEEP");   break;
+        case SQUEEZE: Serial.println("SQUEEZE"); break;
+        case DRY:     Serial.println("DRY");     break;
+        case EJECT:   Serial.println("EJECT");   break;
+        case STANDBY: Serial.println("STANDBY"); break;
+    }
+}
+
+void printMotorsVoltage(int msPrintInterval)
+{
+  static unsigned long lastPrintTime = 0;
+  unsigned long now = millis();
+  if (now - lastPrintTime >= msPrintInterval) {
+    lastPrintTime = now;
+    int adcValue = analogRead(MOTORS_ADC);      // Read ADC value
+    float voltage = adcValue * (3.3 / 4095.0);  // Convert to voltage
+    Serial.print("Voltage: ");  // Print voltage value
+    Serial.println(voltage, 3); // Print with 3 decimal places
+  }
 }

@@ -73,7 +73,7 @@ void loop() {
 }
 
 void transitionTo(SpongeState newState) {
-    Serial.print("Transitioning from ");
+    Serial.print("\nTransitioning from ");
     switch (state) {
         case SLEEP:   Serial.print("SLEEP");   break;
         case SQUEEZE: Serial.print("SQUEEZE"); break;
@@ -91,30 +91,17 @@ void transitionTo(SpongeState newState) {
         case STANDBY: Serial.println("STANDBY"); break;
     }
 
-  state = newState; // Update the state  
+  state = newState; // Update the state 
+
   // Handle entry actions for new state
   switch (newState) {
-    case SLEEP:
-      stopMotor();
-      break;
-      
-    case SQUEEZE:
-      startMotorForward();
-      break;
-
-    case DRY:
-      stopMotor();
-      // Save timestamp for dry timing
-      dryStartTime = millis();
-      break;
-
-    case STANDBY:
-      stopMotor();
-      break;
-
-    case EJECT:
-      startMotorBackward();
-      break;
+    case SLEEP:    stopMotor();           break;      
+    case SQUEEZE:  startMotorForward();   break;
+    case DRY:      stopMotor();
+                   dryStartTime = millis(); // Save timestamp for dry timing
+                                          break;
+    case STANDBY:  delay(1000);           break;
+    case EJECT:    startMotorBackward();  break;
   }
 }
 
@@ -125,27 +112,12 @@ void handleSleepState()
 
 void handleSqueezeState()
 {
-  // Check if motor should stop due to voltage exceeding threshold
-  // The MotorControl class handles the ADC monitoring through interrupts
-//   if (MotorControl::shouldStop) {
-//     Serial.println("Stopping motor due to high voltage, aborting squeeze");
-//     motor1.stopMotor();
-//     motor2.stopMotor();
-//     MotorControl::shouldStop = false;  // Reset the flag
-//     transitionTo(EJECT);
-//     return;
-//   }
-
   // Check if the motor has finished squeezing (detected by IR_D0 going HIGH)
-  if (digitalRead(IR_D0) == HIGH) {
-    Serial.println("Squeeze completed");
-    transitionTo(DRY);
-  } 
+  if (digitalRead(IR_D0) == HIGH) {transitionTo(DRY);} 
 }
 
 void handleDryState()
 {
-  // Check if drying time is up
   unsigned long currentTime = millis();
   unsigned long elapsedTime = currentTime - dryStartTime;
   
