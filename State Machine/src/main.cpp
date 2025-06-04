@@ -18,11 +18,11 @@
 #define DHT_SCL 33    // DHT20 I2C clock line
 
 // Motor control pins - PWM and direction pairs
-#define MOTOR1_PWM 5
-#define MOTOR1_DIR 18
-#define MOTOR2_PWM 19
-#define MOTOR2_DIR 21
-#define MOTORS_ADC 14
+#define MOTOR1_PWM 18
+#define MOTOR1_DIR 19
+#define MOTOR2_PWM 21
+#define MOTOR2_DIR 22
+#define MOTORS_ADC 4
 
 // Fan control
 #define FAN_PIN  (gpio_num_t)32
@@ -220,8 +220,8 @@ void handleSqueezeState()
     }
   } else {
     // Stage 2: Wait for the sponge to fully enter the evap chamber
-    if (millis() - startTime >= 1600) {
-      transitionTo(EJECT);
+    if (millis() - startTime >= 1400) {
+      transitionTo(DRY);
     }
   }
 }
