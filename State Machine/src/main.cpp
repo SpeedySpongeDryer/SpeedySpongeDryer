@@ -25,7 +25,7 @@
 #define MOTORS_ADC 4
 
 // Fan control
-#define FAN_PIN  (gpio_num_t)32
+#define FAN_PIN  (gpio_num_t)23
 
 // Threshold definitions
 #define DRY_TIMEUP 1200000  // 20 minutes
@@ -41,7 +41,7 @@ typedef enum {
 
 // Global variables
 DHT20 DHT(&Wire1);
-SpongeState state = SLEEP;
+RTC_DATA_ATTR SpongeState state = SLEEP;
 MotorControl motors(MOTOR1_PWM, MOTOR1_DIR, MOTORS_ADC, MOTOR2_PWM, MOTOR2_DIR);
 unsigned long squeezeTime = 0, squeezeStartTime = 0, dryTime = 0, dryStartTime = 0, ejectStartTime = 0;
 float temperature = 0, humidity = 0;
@@ -61,9 +61,6 @@ void setup()
 {
   Serial.begin(115200);
 
-  // Release any held pins from previous deep sleep
-  rtc_gpio_hold_dis(FAN_PIN);
-
   // TCRT5000 setup
   pinMode(IR_D0, INPUT);
   pinMode(IR_A0, INPUT);
@@ -81,6 +78,7 @@ void setup()
   motors.setupADCInterrupt();
 
   // Fan setup
+  rtc_gpio_hold_dis(FAN_PIN);        // Release held pin from previous deep sleep
   pinMode(FAN_PIN, OUTPUT);          // Set as normal GPIO output
   digitalWrite(FAN_PIN, LOW);        // Force the pin LOW
 
@@ -92,10 +90,10 @@ void loop()
 {
   // State machine implementation
   switch (state) {
-    case STANDBY: handleStandbyState(); break;
     case SLEEP:   handleSleepState();   break;
     case SQUEEZE: handleSqueezeState(); break;
     case DRY:     handleDryState();     break;
+    case STANDBY: handleStandbyState(); break;
     case EJECT:   handleEjectState();   break;
   }  
 }
@@ -107,6 +105,8 @@ void transitionTo(SpongeState newState)
   // One exit action:
   // If coming from DRY, turn the fan off
   if(state == DRY) {digitalWrite(FAN_PIN, LOW);}
+
+  state = newState; // Update the state BEFORE going to sleep
   
   // Handle entry actions for new state
   switch (newState) {
@@ -178,8 +178,6 @@ void transitionTo(SpongeState newState)
       motors.startMotorsBackward();
       break;
   }
-
-  state = newState; // Update the state
 }
 
 void handleSleepState()
@@ -220,7 +218,7 @@ void handleSqueezeState()
     }
   } else {
     // Stage 2: Wait for the sponge to fully enter the evap chamber
-    if (millis() - startTime >= 1400) {
+    if (millis() - startTime >= 1500) {
       transitionTo(DRY);
     }
   }

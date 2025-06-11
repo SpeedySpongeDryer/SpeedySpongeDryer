@@ -45,7 +45,7 @@ void MotorControl::startMotorsForward() {
     digitalWrite(_pwm2Pin1, HIGH);
     digitalWrite(_pwm2Pin2, LOW);
     Serial.println("Both motors are rotating forward"); // Print forward rotation message / 打印正转信息
-    slowStartBothMotors(0, 2, 255); // Gradually increase speed / 慢慢加速
+    slowStartBothMotors(0, 2, 195); // Gradually increase speed / 慢慢加速
 }
 
 void MotorControl::startMotorsBackward() {
